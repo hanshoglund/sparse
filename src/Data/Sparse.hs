@@ -67,13 +67,6 @@ import Data.Foldable(Foldable)
 import Control.Applicative
 import Control.Monad.Plus
 
--- TODO
-instance Semigroup (Partial a b) where (<>) = mplus
-
-
-
-
-
 
 newtype a ?-> b = PartialP { getPartialP :: a -> Maybe (a, b) }
 
@@ -132,6 +125,7 @@ runSparse' = runSparseT'
 --
 --   Fails if the predicate fails, or if there is no more input.
 --
+headP :: (b -> Bool) -> SparseT [b] b
 headP  = SparseT . PartialP . headP'
 
 -- | Consume one or more input elements.
@@ -141,6 +135,7 @@ headP  = SparseT . PartialP . headP'
 --
 --   Fails if the predicate return 0 or less, or if there is no more input.
 --
+splitP :: ([a] -> Int) -> SparseT [a] [a]
 splitP = SparseT . PartialP . splitP'
 
 headP' :: (a -> Bool) -> [a] -> Maybe ([a], a)
