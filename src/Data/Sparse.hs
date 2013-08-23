@@ -48,9 +48,6 @@ module Data.Sparse (
         stringIf,
 
         -- * Combinators
-        optionally,
-        optionallyMaybe,
-        Data.Sparse.optional,
         between,
         skipMany1,
         skipMany,
@@ -110,7 +107,7 @@ instance Monoid ((?->) a b) where
 newtype SparseT s a b = SparseT { getSparseT :: (s, [a]) ?-> b }
     deriving (Semigroup, Monoid, Functor, Pointed, Applicative, Alternative, Monad, MonadPlus)
 
-instance IsString (SparseT a Char String) where
+instance IsString (SparseT s Char String) where
     fromString = string
 
 type Sparse = SparseT () Char
@@ -183,7 +180,10 @@ splitP' p (s, ys) = let n = p s ys in if n < 1 then Nothing else Just ((s, drop 
 ----------
 
 -- char :: Char -> Sparse Char
+
 char c = charIf (== c)
+
+notChar c = charIf (/= c)
 
 -- charIf :: (Char -> Bool) -> Sparse Char
 charIf p = headP (const p)
@@ -199,9 +199,7 @@ asSparse :: Sparse a -> Sparse a
 
 ----------
 
-optionally x p          = p <|> return x
-optionallyMaybe p       = optionally Nothing (liftM Just p)
-optional p              = do{ p; return ()} <|> return ()
+-- Use applicative optional
 between open close p
                         = do{ open; x <- p; close; return x }
 skipMany1 p             = do{ p; skipMany p }
@@ -229,23 +227,72 @@ count n p               | n <= 0    = return []
 
 ----------
 
-space  = many (charIf isSpace)
-symbol = many (charIf isAlphaNum)
+space   = many1 (charIf isSpace)
+symbol  = many1 (charIf isAlphaNum)
+
+integer :: SparseT s Char Integer
+integer = read <$> many1 (charIf isDigit)
+
+stringLiteral :: SparseT s Char String
+stringLiteral = between (char '"') (char '"') $ many (notChar '"')
 
 ----------
+
+-- Test
+
+
 
 
 test :: SparseT Int Char String
 test = withState id id $ do
     string "name:"
-    space        
+    optional space        
     n <- symbol
     m <- withState (+ 10) (subtract 10) stateP
-    space
+    optional space
     many1 (string ";")
-    space
+    optional space
     return ("Name is " ++ n ++ ", state is " ++ show m)
 
+
+data JSON
+    = Object [(String, JSON)]
+    | Array [JSON]
+    | String String
+    | Number Double
+    | Boolean Bool
+    | Null
+    deriving (Eq, Ord, Show)
+
+json :: Sparse JSON
+json = empty
+    <|> 
+    (Object <$> members)
+    <|>     
+    (Array <$> elements)
+    <|>     
+    (String <$> stringLiteral)
+    <|>
+    ((Number . fromIntegral) <$> integer)
+    <|>
+    (string "false" >> return (Boolean False))
+    <|>
+    (string "true" >> return (Boolean True))
+    <|>
+    (string "null" >> return Null)     
+    where  
+        members  = between (char '{') (char '}') (pair `sepBy` char ',')
+        elements = between (char '[') (char ']') (value `sepBy` char ',')
+
+        pair  = do
+            n <- stringLiteral
+            optional space
+            string ":"
+            optional space
+            v <- json
+            return (n, v)
+            
+        value = json
 
 
 
