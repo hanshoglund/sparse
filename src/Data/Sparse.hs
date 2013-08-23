@@ -8,17 +8,21 @@
     #-}
 
 
-module Sparse (
+module Data.Sparse (
         -- * Sparse
         SparseT,
         Sparse,
-        runSparseT,
-        runSparseT,
-        runSparse,
         asSparse,
 
+        -- * Running
+        runSparseT,
+        runSparseT',
+        runSparse,
+        runSparse',
+
+        -- * Primitives
         headP,
-        splitN,
+        splitP,
         
         -- * Basic parsers
         char,
@@ -29,7 +33,7 @@ module Sparse (
         -- * Combinators
         optionally,
         optionallyMaybe,
-        Sparse.optional,
+        Data.Sparse.optional,
         between,
         skipMany1,
         skipMany,
@@ -85,6 +89,9 @@ instance Monoid ((?->) a b) where
     mempty  = mzero
     mappend = mplus
 
+
+----------
+
 newtype SparseT a b = SparseT { getSparseT :: a ?-> b }
     deriving (Semigroup, Monoid, Functor, Applicative, Alternative, Monad, MonadPlus)
 
@@ -94,7 +101,7 @@ instance IsString (SparseT String String) where
 type Sparse = SparseT String
 
 runSparseT :: SparseT a b -> a -> Maybe b
-runSparseT = fmap (fmap snd) . getPartialP . getSparseT
+runSparseT = fmap (fmap snd) . runSparseT'
 
 runSparseT' :: SparseT a b -> a -> Maybe (a, b)
 runSparseT' = getPartialP . getSparseT
@@ -102,16 +109,21 @@ runSparseT' = getPartialP . getSparseT
 runSparse :: Sparse a -> String -> Maybe a
 runSparse = runSparseT
 
+runSparse' :: Sparse a -> String -> Maybe (String, a)
+runSparse' = runSparseT'
+
 ----------
 
+headP  = SparseT . PartialP . headP'
+splitP = SparseT . PartialP . splitP'
 
-headP :: (a -> Bool) -> [a] -> Maybe ([a], a)
-headP p []     = Nothing
-headP p (x:xs) = if not (p x) then Nothing else Just (xs, x)
+headP' :: (a -> Bool) -> [a] -> Maybe ([a], a)
+headP' p []     = Nothing
+headP' p (x:xs) = if not (p x) then Nothing else Just (xs, x)
 
-splitN :: ([a] -> Int) -> [a] -> Maybe ([a], [a])
-splitN p [] = Nothing
-splitN p ys = let n = p ys in if n < 1 then Nothing else Just (drop n ys, take n ys)
+splitP' :: ([a] -> Int) -> [a] -> Maybe ([a], [a])
+splitP' p [] = Nothing
+splitP' p ys = let n = p ys in if n < 1 then Nothing else Just (drop n ys, take n ys)
 
 ----------
 
@@ -119,13 +131,13 @@ char :: Char -> Sparse Char
 char c = charIs (== c)
 
 charIs :: (Char -> Bool) -> Sparse Char
-charIs p = SparseT $ PartialP $ headP p
+charIs p = headP p
 
-string :: String -> SparseT String String
+string :: String -> Sparse String
 string s = stringIs (length s) (== s)
 
 stringIs :: Int -> (String -> Bool) -> Sparse String
-stringIs n p = SparseT $ PartialP $ splitN (\xs -> if p (take n xs) then n else 0)
+stringIs n p = splitP (\xs -> if p (take n xs) then n else 0)
 
 asSparse = id
 asSparse :: Sparse a -> Sparse a
