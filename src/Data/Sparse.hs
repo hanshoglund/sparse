@@ -23,7 +23,7 @@ module Data.Sparse (
         -- * Primitives
         headP,
         splitP,
-        
+
         -- * Basic parsers
         char,
         charIs,
@@ -62,7 +62,7 @@ instance Semigroup (Partial a b) where (<>) = mplus
 
 
 newtype a ?-> b = PartialP { getPartialP :: a -> Maybe (a, b) }
-    
+
 instance Functor ((?->) r) where
     fmap f (PartialP g) = PartialP (fmap (fmap f) . g)
 
@@ -115,18 +115,18 @@ runSparse' = runSparseT'
 ----------
 
 -- | Consumes one input element.
---   
+--
 --   Fails if the predicate fails, or if there is no more input.
---   
+--
 headP  = SparseT . PartialP . headP'
 
 -- | Consume one or more input elements.
---   
---   The given function receives the /entire/ remaining input, and must return 
+--
+--   The given function receives the /entire/ remaining input, and must return
 --   the number of consumed elements.
 --
 --   Fails if the predicate return 0 or less, or if there is no more input.
---   
+--
 splitP = SparseT . PartialP . splitP'
 
 headP' :: (a -> Bool) -> [a] -> Maybe ([a], a)
