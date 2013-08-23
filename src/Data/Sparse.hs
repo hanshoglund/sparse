@@ -36,14 +36,17 @@ module Data.Sparse (
         withState,
 
         -- * Primitives
+        stateP,
+        mapStateP,
+        mapInputP,
         headP,
         splitP,
 
         -- * Basic parsers
         char,
-        charIs,
+        charIf,
         string,
-        stringIs,
+        stringIf,
 
         -- * Combinators
         optionally,
@@ -62,6 +65,7 @@ module Data.Sparse (
         count
 ) where
 
+import Data.Char
 import Data.String
 import Data.Semigroup
 import Data.Foldable(Foldable)
@@ -121,7 +125,7 @@ runSparse' :: Sparse a -> ((), String) -> Maybe (((), String), a)
 runSparse' = runSparseT'
 
 -- TODO
-withState :: (s -> s) -> (s -> s) -> SparseT s a b -> SparseT s a b
+withState :: (s -> t) -> (t -> s) -> SparseT t a b -> SparseT s a b
 withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
     where
         ws f = fmap (first (first teardown)) . f . first setup
@@ -129,12 +133,28 @@ withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
 
 ----------
 
+stateP :: SparseT s a s
+stateP = (SparseT (PartialP st))
+    where
+        st = \(s, as) -> Just ((s, as), s)
+
+mapStateP :: (s -> s) -> SparseT s a ()
+mapStateP f = (SparseT (PartialP st))
+    where
+        st = \(s, as) -> Just ((f s, as), ())
+
+-- mapInputP :: (s -> s) -> SparseT s a ()
+mapInputP f = (SparseT (PartialP st))
+    where
+        st = \(s, as) -> Just ((s, f as), ())
+
+
 -- | Consumes one input element.
 --
 --   Fails if the predicate fails, or if there is no more input.
 --
-headP :: (a -> Bool) -> SparseT s a a
-headP  = SparseT . PartialP . headP' . const
+headP :: (s -> a -> Bool) -> SparseT s a a
+headP  = SparseT . PartialP . headP'
 
 -- | Consume one or more input elements.
 --
@@ -143,8 +163,8 @@ headP  = SparseT . PartialP . headP' . const
 --
 --   Fails if the predicate return 0 or less, or if there is no more input.
 --
-splitP :: ([a] -> Int) -> SparseT s a [a]
-splitP = SparseT . PartialP . splitP' . const
+splitP :: (s -> [a] -> Int) -> SparseT s a [a]
+splitP = SparseT . PartialP . splitP'
 
 headP' :: (s -> a -> Bool) -> (s, [a]) -> Maybe ((s, [a]), a)
 headP' p (s, [])     = Nothing
@@ -158,16 +178,16 @@ splitP' p (s, ys) = let n = p s ys in if n < 1 then Nothing else Just ((s, drop 
 ----------
 
 -- char :: Char -> Sparse Char
-char c = charIs (== c)
+char c = charIf (== c)
 
--- charIs :: (Char -> Bool) -> Sparse Char
-charIs p = headP p
+-- charIf :: (Char -> Bool) -> Sparse Char
+charIf p = headP (const p)
 
 -- string :: String -> Sparse String
-string s = stringIs (length s) (== s)
+string s = stringIf (length s) (== s)
 
--- stringIs :: Int -> (String -> Bool) -> Sparse String
-stringIs n p = splitP (\xs -> if p (take n xs) then n else 0)
+-- stringIf :: Int -> (String -> Bool) -> Sparse String
+stringIf n p = splitP (\_ xs -> if p (take n xs) then n else 0)
 
 asSparse = id
 asSparse :: Sparse a -> Sparse a
@@ -204,9 +224,22 @@ count n p               | n <= 0    = return []
 
 ----------
 
+space  = many (charIf isSpace)
+symbol = many (charIf isAlphaNum)
 
--- test :: Sparse [String]
-test = asSparse $ string "hans" >> many1 (string ";")
+----------
+
+
+test :: SparseT Int Char String
+test = withState id id $ do
+    string "name:"
+    space        
+    n <- symbol
+    m <- withState (+ 10) (subtract 10) stateP
+    space
+    many1 (string ";")
+    space
+    return ("Name is " ++ n ++ ", state is " ++ show m)
 
 
 
