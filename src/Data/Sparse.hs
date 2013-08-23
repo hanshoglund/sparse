@@ -29,9 +29,9 @@ module Data.Sparse (
         asSparse,
 
         -- * Running
+        runSparse,
         runSparseT,
         runSparseT',
-        runSparse,
         withState,
 
         -- * Primitives
@@ -42,10 +42,14 @@ module Data.Sparse (
         splitP,
 
         -- * Basic parsers
-        char,
+        char,         
+        notChar,
         charIf,
         string,
         stringIf,
+        space,
+        integer,
+        stringLiteral,
 
         -- * Combinators
         between,
@@ -107,22 +111,35 @@ instance Monoid ((?->) a b) where
 newtype SparseT s a b = SparseT { getSparseT :: (s, [a]) ?-> b }
     deriving (Semigroup, Monoid, Functor, Pointed, Applicative, Alternative, Monad, MonadPlus)
 
+asSparse = id
+asSparse :: Sparse a -> Sparse a
+
 instance IsString (SparseT s Char String) where
     fromString = string
 
 type Sparse = SparseT () Char
 
-runSparseT :: SparseT s a b -> s -> [a] -> Maybe b
-runSparseT = curry . fmap (fmap snd) . getPartialP . getSparseT
-
-runSparseT' :: SparseT s a b -> s -> [a] -> Maybe ((s, [a]), b)
-runSparseT' = curry . getPartialP . getSparseT
-
+-- | 
+-- Run a parser, returning the result.
+-- 
 runSparse :: Sparse a -> String -> Maybe a
 runSparse p = runSparseT p ()
 
-runSparse' :: Sparse a -> String -> Maybe (((), String), a)
-runSparse' p = runSparseT' p ()
+-- | 
+-- Run a parser with a custom state, returning the result.
+-- 
+runSparseT :: SparseT s a b -> s -> [a] -> Maybe b
+runSparseT = curry . fmap (fmap snd) . getPartialP . getSparseT
+
+-- | 
+-- Run a parser with a custom state.
+--
+-- This is the most general way to run a parser. It returns the final state,
+-- remaining input and the result.
+-- 
+runSparseT' :: SparseT s a b -> s -> [a] -> Maybe (s, [a], b)
+runSparseT' = curry . fmap (fmap untrip) . getPartialP . getSparseT
+    where untrip ((a,b),c) = (a,b,c)
 
 withState :: (s -> t) -> (t -> s) -> SparseT t a b -> SparseT s a b
 withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
@@ -194,9 +211,6 @@ string s = stringIf (length s) (== s)
 -- stringIf :: Int -> (String -> Bool) -> Sparse String
 stringIf n p = splitP (\_ xs -> if p (take n xs) then n else 0)
 
-asSparse = id
-asSparse :: Sparse a -> Sparse a
-
 ----------
 
 -- Use applicative optional
@@ -236,6 +250,9 @@ integer = read <$> many1 (charIf isDigit)
 stringLiteral :: SparseT s Char String
 stringLiteral = between (char '"') (char '"') $ many (notChar '"')
 
+brackets = between (char '{') (char '}')
+braces   = between (char '[') (char ']')
+
 ----------
 
 -- Test
@@ -264,25 +281,18 @@ data JSON
     | Null
     deriving (Eq, Ord, Show)
 
-json :: Sparse JSON
+json :: SparseT s Char JSON
 json = empty
-    <|> 
-    (Object <$> members)
-    <|>     
-    (Array <$> elements)
-    <|>     
-    (String <$> stringLiteral)
-    <|>
-    ((Number . fromIntegral) <$> integer)
-    <|>
-    (string "false" >> return (Boolean False))
-    <|>
-    (string "true" >> return (Boolean True))
-    <|>
-    (string "null" >> return Null)     
+    <|> (Object                   <$> members)
+    <|> (Array                    <$> elements)
+    <|> (String                   <$> stringLiteral)
+    <|> ((Number . fromIntegral)  <$> integer)
+    <|> (const (Boolean False)    <$> string "false")
+    <|> (const (Boolean True)     <$> string "true")
+    <|> (const Null               <$> string "null")     
     where  
-        members  = between (char '{') (char '}') (pair `sepBy` char ',')
-        elements = between (char '[') (char ']') (value `sepBy` char ',')
+        members  = brackets (pair `sepBy` char ',')
+        elements = braces (value `sepBy` char ',')
 
         pair  = do
             n <- stringLiteral
