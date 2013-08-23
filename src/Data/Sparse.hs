@@ -33,6 +33,7 @@ module Data.Sparse (
         runSparseT',
         runSparse,
         runSparse',
+        withState,
 
         -- * Primitives
         headP,
@@ -99,7 +100,7 @@ instance Monoid ((?->) a b) where
 
 ----------
 
-newtype SparseT s a b = SparseT { getSparseT :: [a] ?-> b }
+newtype SparseT s a b = SparseT { getSparseT :: (s, [a]) ?-> b }
     deriving (Semigroup, Monoid, Functor, Applicative, Alternative, Monad, MonadPlus)
 
 instance IsString (SparseT a Char String) where
@@ -107,17 +108,24 @@ instance IsString (SparseT a Char String) where
 
 type Sparse = SparseT () Char
 
-runSparseT :: SparseT s a b -> [a] -> Maybe b
+runSparseT :: SparseT s a b -> (s, [a]) -> Maybe b
 runSparseT = fmap (fmap snd) . runSparseT'
 
-runSparseT' :: SparseT s a b -> [a] -> Maybe ([a], b)
+runSparseT' :: SparseT s a b -> (s, [a]) -> Maybe ((s, [a]), b)
 runSparseT' = getPartialP . getSparseT
 
-runSparse :: Sparse a -> String -> Maybe a
+runSparse :: Sparse a -> ((), String) -> Maybe a
 runSparse = runSparseT
 
-runSparse' :: Sparse a -> String -> Maybe (String, a)
+runSparse' :: Sparse a -> ((), String) -> Maybe (((), String), a)
 runSparse' = runSparseT'
+
+-- TODO
+withState :: (s -> s) -> (s -> s) -> SparseT s a b -> SparseT s a b
+withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
+    where
+        ws f = fmap (first (first teardown)) . f . first setup
+
 
 ----------
 
@@ -126,7 +134,7 @@ runSparse' = runSparseT'
 --   Fails if the predicate fails, or if there is no more input.
 --
 headP :: (a -> Bool) -> SparseT s a a
-headP  = SparseT . PartialP . headP'
+headP  = SparseT . PartialP . headP' . const
 
 -- | Consume one or more input elements.
 --
@@ -136,15 +144,15 @@ headP  = SparseT . PartialP . headP'
 --   Fails if the predicate return 0 or less, or if there is no more input.
 --
 splitP :: ([a] -> Int) -> SparseT s a [a]
-splitP = SparseT . PartialP . splitP'
+splitP = SparseT . PartialP . splitP' . const
 
-headP' :: (a -> Bool) -> [a] -> Maybe ([a], a)
-headP' p []     = Nothing
-headP' p (x:xs) = if not (p x) then Nothing else Just (xs, x)
+headP' :: (s -> a -> Bool) -> (s, [a]) -> Maybe ((s, [a]), a)
+headP' p (s, [])     = Nothing
+headP' p (s, (x:xs)) = if not (p s x) then Nothing else Just ((s, xs), x)
 
-splitP' :: ([a] -> Int) -> [a] -> Maybe ([a], [a])
-splitP' p [] = Nothing
-splitP' p ys = let n = p ys in if n < 1 then Nothing else Just (drop n ys, take n ys)
+splitP' :: (s -> [a] -> Int) -> (s, [a]) -> Maybe ((s, [a]), [a])
+splitP' p (s, []) = Nothing
+splitP' p (s, ys) = let n = p s ys in if n < 1 then Nothing else Just ((s, drop n ys), take n ys)
 
 
 ----------
@@ -203,6 +211,7 @@ test = asSparse $ string "hans" >> many1 (string ";")
 
 
 
+first f (a, b) = (f a, b)
 single x = [x]
 list z f xs = case xs of
     [] -> z
