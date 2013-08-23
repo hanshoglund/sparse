@@ -8,7 +8,40 @@
     #-}
 
 
-module Sparse where
+module Sparse (
+        -- * Sparse
+        SparseT,
+        Sparse,
+        runSparseT,
+        runSparseT,
+        runSparse,
+        asSparse,
+
+        headP,
+        splitN,
+        
+        -- * Basic parsers
+        char,
+        charIs,
+        string,
+        stringIs,
+
+        -- * Combinators
+        optionally,
+        optionallyMaybe,
+        Sparse.optional,
+        between,
+        skipMany1,
+        skipMany,
+        many1,
+        sepBy,
+        sepBy1,
+        sepEndBy1,
+        sepEndBy,
+        endBy1,
+        endBy,
+        count
+) where
 
 import Data.String
 import Data.Semigroup
@@ -52,21 +85,19 @@ instance Monoid ((?->) a b) where
     mempty  = mzero
     mappend = mplus
 
--- TODO FlexibleInstances
-instance IsString (String ?-> String) where
-    fromString = string
+newtype SparseT a b = SparseT { getSparseT :: a ?-> b }
+    deriving (Semigroup, Monoid, Functor, Applicative, Alternative, Monad, MonadPlus)
 
--- newtype SparseT a b = SparseT { getSparseT :: a ?-> b }
-type SparseT = (?->)
-    -- deriving (Semigroup, Monoid, Functor, Applicative, Alternative, Monad, MonadPlus)
+instance IsString (SparseT String String) where
+    fromString = string
 
 type Sparse = SparseT String
 
 runSparseT :: SparseT a b -> a -> Maybe b
-runSparseT = fmap (fmap snd) . getPartialP
+runSparseT = fmap (fmap snd) . getPartialP . getSparseT
 
 runSparseT' :: SparseT a b -> a -> Maybe (a, b)
-runSparseT' = getPartialP
+runSparseT' = getPartialP . getSparseT
 
 runSparse :: Sparse a -> String -> Maybe a
 runSparse = runSparseT
@@ -88,13 +119,13 @@ char :: Char -> Sparse Char
 char c = charIs (== c)
 
 charIs :: (Char -> Bool) -> Sparse Char
-charIs p = PartialP $ headP p
+charIs p = SparseT $ PartialP $ headP p
 
-string :: String -> Sparse String
+string :: String -> SparseT String String
 string s = stringIs (length s) (== s)
 
 stringIs :: Int -> (String -> Bool) -> Sparse String
-stringIs n p = PartialP $ splitN (\xs -> if p (take n xs) then n else 0)
+stringIs n p = SparseT $ PartialP $ splitN (\xs -> if p (take n xs) then n else 0)
 
 asSparse = id
 asSparse :: Sparse a -> Sparse a
