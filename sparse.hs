@@ -1,14 +1,16 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving,
+    OverloadedStrings,
     TypeOperators,
     DeriveFunctor,
     DeriveFoldable,
-    TypeSynonymInstances
+    FlexibleInstances
     #-}
 
 
 module Sparse where
 
+import Data.String
 import Data.Semigroup
 import Data.Foldable(Foldable)
 import Control.Applicative
@@ -50,8 +52,9 @@ instance Monoid ((?->) a b) where
     mempty  = mzero
     mappend = mplus
 
-
-
+-- TODO FlexibleInstances
+instance IsString (String ?-> String) where
+    fromString = string
 
 -- newtype SparseT a b = SparseT { getSparseT :: a ?-> b }
 type SparseT = (?->)
@@ -92,7 +95,45 @@ string s = stringIs (length s) (== s)
 
 stringIs :: Int -> (String -> Bool) -> Sparse String
 stringIs n p = PartialP $ splitN (\xs -> if p (take n xs) then n else 0)
+
+asSparse = id
+asSparse :: Sparse a -> Sparse a
+
 ----------
+
+optionally x p          = p <|> return x
+optionallyMaybe p       = optionally Nothing (liftM Just p)
+optional p          = do{ p; return ()} <|> return ()
+between open close p
+                    = do{ open; x <- p; close; return x }
+skipMany1 p         = do{ p; skipMany p }
+skipMany p          = scan
+                    where
+                      scan  = do{ p; scan } <|> return ()
+many1 p             = do{ x <- p; xs <- many p; return (x:xs) }
+sepBy p sep         = sepBy1 p sep <|> return []
+sepBy1 p sep        = do{ x <- p
+                        ; xs <- many (sep >> p)
+                        ; return (x:xs)
+                        }
+sepEndBy1 p sep     = do{ x <- p
+                        ; do{ sep
+                            ; xs <- sepEndBy p sep
+                            ; return (x:xs)
+                            }
+                          <|> return [x]
+                        }
+sepEndBy p sep      = sepEndBy1 p sep <|> return []
+endBy1 p sep        = many1 (do{ x <- p; sep; return x })
+endBy p sep         = many (do{ x <- p; sep; return x })
+count n p           | n <= 0    = return []
+                    | otherwise = sequence (replicate n p)
+
+----------
+
+
+-- test :: Sparse [String]
+test = asSparse $ string "hans" >> many1 (string ";")
 
 
 
