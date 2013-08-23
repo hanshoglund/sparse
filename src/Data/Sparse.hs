@@ -32,7 +32,6 @@ module Data.Sparse (
         runSparseT,
         runSparseT',
         runSparse,
-        runSparse',
         withState,
 
         -- * Primitives
@@ -67,6 +66,7 @@ module Data.Sparse (
 
 import Data.Char
 import Data.String
+import Data.Pointed
 import Data.Semigroup
 import Data.Foldable(Foldable)
 import Control.Applicative
@@ -94,6 +94,9 @@ instance Alternative ((?->) r) where
     empty = mzero
     (<|>) = mplus
 
+instance Pointed ((?->) r) where
+    point = return
+
 instance Semigroup ((?->) a b) where
     (<>) = mplus
 
@@ -105,26 +108,25 @@ instance Monoid ((?->) a b) where
 ----------
 
 newtype SparseT s a b = SparseT { getSparseT :: (s, [a]) ?-> b }
-    deriving (Semigroup, Monoid, Functor, Applicative, Alternative, Monad, MonadPlus)
+    deriving (Semigroup, Monoid, Functor, Pointed, Applicative, Alternative, Monad, MonadPlus)
 
 instance IsString (SparseT a Char String) where
     fromString = string
 
 type Sparse = SparseT () Char
 
-runSparseT :: SparseT s a b -> (s, [a]) -> Maybe b
-runSparseT = fmap (fmap snd) . runSparseT'
+runSparseT :: SparseT s a b -> s -> [a] -> Maybe b
+runSparseT = curry . fmap (fmap snd) . getPartialP . getSparseT
 
-runSparseT' :: SparseT s a b -> (s, [a]) -> Maybe ((s, [a]), b)
-runSparseT' = getPartialP . getSparseT
+runSparseT' :: SparseT s a b -> s -> [a] -> Maybe ((s, [a]), b)
+runSparseT' = curry . getPartialP . getSparseT
 
-runSparse :: Sparse a -> ((), String) -> Maybe a
-runSparse = runSparseT
+runSparse :: Sparse a -> String -> Maybe a
+runSparse p = runSparseT p ()
 
-runSparse' :: Sparse a -> ((), String) -> Maybe (((), String), a)
-runSparse' = runSparseT'
+runSparse' :: Sparse a -> String -> Maybe (((), String), a)
+runSparse' p = runSparseT' p ()
 
--- TODO
 withState :: (s -> t) -> (t -> s) -> SparseT t a b -> SparseT s a b
 withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
     where
@@ -133,17 +135,20 @@ withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
 
 ----------
 
+-- | Return the state as result.
 stateP :: SparseT s a s
 stateP = (SparseT (PartialP st))
     where
         st = \(s, as) -> Just ((s, as), s)
 
+-- | Transform state.
 mapStateP :: (s -> s) -> SparseT s a ()
 mapStateP f = (SparseT (PartialP st))
     where
         st = \(s, as) -> Just ((f s, as), ())
 
--- mapInputP :: (s -> s) -> SparseT s a ()
+-- | Transform input.
+mapInputP :: ([a] -> [a]) -> SparseT s a ()
 mapInputP f = (SparseT (PartialP st))
     where
         st = \(s, as) -> Just ((s, f as), ())
