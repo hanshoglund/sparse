@@ -6,7 +6,7 @@ author:             Hans Hoglund
 maintainer:         Hans Hoglund <hans@hanshoglund.se>
 license:            BSD3
 license-file:       COPYING
-synopsis:           Simple parsing library.
+synopsis:           Lightweight parsing library based on partial functions.
 category:           
 tested-with:        GHC
 build-type:         Simple

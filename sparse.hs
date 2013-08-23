@@ -43,7 +43,7 @@ instance Alternative ((?->) r) where
     empty = mzero
     (<|>) = mplus
 
-instance Semigroup ((?->)    a b) where
+instance Semigroup ((?->) a b) where
     (<>) = mplus
 
 instance Monoid ((?->) a b) where

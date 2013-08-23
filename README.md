@@ -1,7 +1,7 @@
 
-# foobar
+# sparse
 
-Description.
+Very lightweight parsing library based on partial functions.
 
 ## Requirements
 
