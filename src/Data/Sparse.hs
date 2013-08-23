@@ -114,7 +114,19 @@ runSparse' = runSparseT'
 
 ----------
 
+-- | Consumes one input element.
+--   
+--   Fails if the predicate fails, or if there is no more input.
+--   
 headP  = SparseT . PartialP . headP'
+
+-- | Consume one or more input elements.
+--   
+--   The given function receives the /entire/ remaining input, and must return 
+--   the number of consumed elements.
+--
+--   Fails if the predicate return 0 or less, or if there is no more input.
+--   
 splitP = SparseT . PartialP . splitP'
 
 headP' :: (a -> Bool) -> [a] -> Maybe ([a], a)
