@@ -99,18 +99,18 @@ instance Monoid ((?->) a b) where
 
 ----------
 
-newtype SparseT a b = SparseT { getSparseT :: a ?-> b }
+newtype SparseT s a b = SparseT { getSparseT :: [a] ?-> b }
     deriving (Semigroup, Monoid, Functor, Applicative, Alternative, Monad, MonadPlus)
 
-instance IsString (SparseT String String) where
+instance IsString (SparseT a Char String) where
     fromString = string
 
-type Sparse = SparseT String
+type Sparse = SparseT () Char
 
-runSparseT :: SparseT a b -> a -> Maybe b
+runSparseT :: SparseT s a b -> [a] -> Maybe b
 runSparseT = fmap (fmap snd) . runSparseT'
 
-runSparseT' :: SparseT a b -> a -> Maybe (a, b)
+runSparseT' :: SparseT s a b -> [a] -> Maybe ([a], b)
 runSparseT' = getPartialP . getSparseT
 
 runSparse :: Sparse a -> String -> Maybe a
@@ -125,7 +125,7 @@ runSparse' = runSparseT'
 --
 --   Fails if the predicate fails, or if there is no more input.
 --
-headP :: (b -> Bool) -> SparseT [b] b
+headP :: (a -> Bool) -> SparseT s a a
 headP  = SparseT . PartialP . headP'
 
 -- | Consume one or more input elements.
@@ -135,7 +135,7 @@ headP  = SparseT . PartialP . headP'
 --
 --   Fails if the predicate return 0 or less, or if there is no more input.
 --
-splitP :: ([a] -> Int) -> SparseT [a] [a]
+splitP :: ([a] -> Int) -> SparseT s a [a]
 splitP = SparseT . PartialP . splitP'
 
 headP' :: (a -> Bool) -> [a] -> Maybe ([a], a)
@@ -146,18 +146,19 @@ splitP' :: ([a] -> Int) -> [a] -> Maybe ([a], [a])
 splitP' p [] = Nothing
 splitP' p ys = let n = p ys in if n < 1 then Nothing else Just (drop n ys, take n ys)
 
+
 ----------
 
-char :: Char -> Sparse Char
+-- char :: Char -> Sparse Char
 char c = charIs (== c)
 
-charIs :: (Char -> Bool) -> Sparse Char
+-- charIs :: (Char -> Bool) -> Sparse Char
 charIs p = headP p
 
-string :: String -> Sparse String
+-- string :: String -> Sparse String
 string s = stringIs (length s) (== s)
 
-stringIs :: Int -> (String -> Bool) -> Sparse String
+-- stringIs :: Int -> (String -> Bool) -> Sparse String
 stringIs n p = splitP (\xs -> if p (take n xs) then n else 0)
 
 asSparse = id
