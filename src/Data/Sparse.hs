@@ -1,5 +1,6 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving,
+    ScopedTypeVariables,
     OverloadedStrings,
     TypeOperators,
     DeriveFunctor,
@@ -40,6 +41,7 @@ module Data.Sparse (
         mapInputP,
         headP,
         splitP,
+        gateP,
 
         -- * Basic parsers
         char,         
@@ -66,7 +68,10 @@ module Data.Sparse (
 ) where
 
 import Data.Char
+import Data.Maybe -- DEBUG
 import Data.String
+import Data.Tree
+import Data.Default
 import Data.Pointed
 import Data.Semigroup
 import Data.Foldable(Foldable)
@@ -175,6 +180,7 @@ mapInputP f = (SparseT (PartialP st))
 headP :: (s -> a -> Bool) -> SparseT s a a
 headP  = SparseT . PartialP . headP'
 
+
 -- | Consume one or more input elements.
 --
 --   The given function receives the /entire/ remaining input, and must return
@@ -185,6 +191,14 @@ headP  = SparseT . PartialP . headP'
 splitP :: (s -> [a] -> Int) -> SparseT s a [a]
 splitP = SparseT . PartialP . splitP'
 
+-- | Succeed based on predicate, but do not consume input.
+--
+--   The given function receives the /entire/ remaining input.
+--
+gateP :: (s -> [a] -> Bool) -> SparseT s a ()
+gateP = SparseT . PartialP . gateP'
+
+
 headP' :: (s -> a -> Bool) -> (s, [a]) -> Maybe ((s, [a]), a)
 headP' p (s, [])     = Nothing
 headP' p (s, (x:xs)) = if not (p s x) then Nothing else Just ((s, xs), x)
@@ -193,8 +207,15 @@ splitP' :: (s -> [a] -> Int) -> (s, [a]) -> Maybe ((s, [a]), [a])
 splitP' p (s, []) = Nothing
 splitP' p (s, ys) = let n = p s ys in if n < 1 then Nothing else Just ((s, drop n ys), take n ys)
 
+gateP' :: (s -> [a] -> Bool) -> (s, [a]) -> Maybe ((s, [a]), ())
+gateP' p (s, [])     = Nothing
+gateP' p (s, xs)    = if not (p s xs) then Nothing else Just ((s, xs), ())
+
 
 ----------
+
+ifState :: (s -> Bool) -> SparseT s a b -> SparseT s a b
+ifState p x = gateP (\s _ -> p s) >> x
 
 -- char :: Char -> Sparse Char
 
@@ -255,14 +276,14 @@ braces   = between (char '[') (char ']')
 
 ----------
 
--- Test
+-- Tests
 
 
 
 
 test :: SparseT Int Char String
 test = withState id id $ do
-    string "name:"
+    ifState (== 0) $ string "name:"
     optional space        
     n <- symbol
     m <- withState (+ 10) (subtract 10) stateP
@@ -304,7 +325,155 @@ json = empty
             
         value = json
 
+----------
 
+type Duration = Rational
+
+data Rhythm a
+    = Beat       Duration a                     -- d is divisible by 2
+    | Group      [Rhythm a]                     -- normal note sequence
+    | Dots       Int (Rhythm a)                 -- n > 0.
+    | Tuplet     Duration (Rhythm a)            -- d is an emelent of 'tupletMods'.
+    deriving (Eq, Show, Functor, Foldable)
+
+rhTree :: Show a => Rhythm a -> Tree String
+rhTree = go
+    where
+        go (Beat d a)   = Node (show d{- ++ ":" ++ show a-}) []
+        go (Group as)   = Node "" (fmap rhTree as)
+        go (Dots n a)   = Node ("dot:" ++ show n) [rhTree a]
+        go (Tuplet d a) = Node ("tuplet:" ++ show d) [rhTree a]
+        -- (realToFrac d :: Double)
+
+putRh :: Show a => Maybe (Rhythm a) -> IO () 
+putRh = putStrLn . drawTree . rhTree . fromMaybe (error "Could not quantize")
+
+instance Semigroup (Rhythm a) where
+    (<>) = mappend
+instance Monoid (Rhythm a) where
+    mempty = Group []
+    Group as `mappend` Group bs   =  Group (as <> bs)
+    r        `mappend` Group bs   =  Group ([r] <> bs)
+    Group as `mappend` r          =  Group (as <> [r])
+
+type Quant s a = SparseT s (Duration, a) (Rhythm a)
+
+data QuantState = QuantState {
+        timeMod_ :: Duration,  
+        recur_   :: Int
+    }
+instance Default QuantState where def = QuantState {
+        timeMod_ = 1,
+        recur_   = 0
+    }
+
+class HasTimeScale a where                          
+    getTimeScale :: a -> Duration
+    mapTimeScale :: (Duration -> Duration) -> a -> a
+instance HasTimeScale () where
+    mapTimeScale f  = id          
+    getTimeScale () = 1       
+instance HasTimeScale QuantState where
+    getTimeScale = timeMod_
+    mapTimeScale f (QuantState tm r) = QuantState (f tm) r
+
+class HasRecur a where
+    getRecur :: a -> Int
+    mapRecur :: (Int -> Int) -> a -> a
+    recur, unrecur :: a -> a
+    recur = mapRecur succ
+    unrecur = mapRecur pred
+    guardRecur :: SparseT a m n -> SparseT a m n
+    guardRecur = ifState (\x -> getRecur x < 5)
+instance HasRecur QuantState where
+    getRecur                     = recur_
+    mapRecur f (QuantState tm r) = QuantState tm (f r)
+
+testQuant :: Quant QuantState () -> [Duration] -> Maybe (Rhythm ())
+testQuant p = quant p . (`zip` repeat ())
+
+quant :: Default s => Quant s a -> [(Duration, a)] -> Maybe (Rhythm a)
+quant p = quant' p def
+
+quant' :: Quant s a -> s -> [(Duration, a)] -> Maybe (Rhythm a)
+quant' = runSparseT
+
+
+
+
+-- Tries to match 1
+rh4 :: (HasTimeScale s, HasRecur s) => Quant s a
+rh4 = withState recur unrecur $ guardRecur $ empty
+    <|> note
+
+    -- dotted figures
+    <|> (half (group [rh3, half rh4]))
+    <|> (half (group [half rh4, rh3]))
+
+    -- syncopation
+    <|> (half (group [half note, unit note, half note]))
+
+    <|> (quarter (group [note, note, note, note]))
+
+-- Tries to match 1.5
+rh3 :: (HasTimeScale s, HasRecur s) => Quant s a
+rh3 = withState recur unrecur $ empty
+    <|> dot rh4
+    <|> (group [unit note, half note])
+    <|> (group [half note, unit note])
+    <|> (triple (half (group [rh4, rh4, rh4])))
+
+-- Tries to match something in scale 1.5
+dot, unit, double, half, triple, quarter :: (HasTimeScale s, HasRecur s) => Quant s a -> Quant s a
+dot = fmap (Dots 1) . scaleTime (3/2)
+unit = scaleTime (2/2)
+double = scaleTime (2/1)
+half = scaleTime (1/2)
+quarter = scaleTime (1/4)
+triple = scaleTime (1/3)
+
+-- Tries to match 1 as a note
+note :: (HasTimeScale s, HasRecur s) => Quant s a
+note = noteIf (\s d x -> d / getTimeScale s == 1)
+
+scaleTime :: (HasTimeScale s, HasRecur s) => Duration -> Quant s a -> Quant s a
+scaleTime n = withState 
+    (mapTimeScale (* n)) 
+    (mapTimeScale (/ n))
+
+group :: [Quant s a] -> Quant s a
+group xs = Group <$> sequence xs
+
+-- Mathes a single note whose duration is simple
+-- note :: Quant s a
+-- note = noteIf (\s d x -> isDivisibleBy 2 d)
+
+
+
+noteIf :: (s -> Duration -> a -> Bool) -> Quant s a
+noteIf p = uncurry beat <$> headP (\s (d,x) -> p s d x)
+    where
+        beat :: Duration -> a -> Rhythm a
+        beat d x = Beat d x
+        
+
+
+
+
+
+-- As it sounds
+isDivisibleBy :: Duration -> Duration -> Bool
+isDivisibleBy n = (== 0.0) . snd . properFraction . logBaseR (toRational n) . toRational
+
+logBaseR :: forall a . (RealFloat a, Floating a) => Rational -> Rational -> a
+logBaseR k n
+    | isInfinite (fromRational n :: a)      = logBaseR k (n/k) + 1
+logBaseR k n
+    | isDenormalized (fromRational n :: a)  = logBaseR k (n*k) - 1
+logBaseR k n                         = logBase (fromRational k) (fromRational n)
+
+
+----------
 
 first f (a, b) = (f a, b)
 single x = [x]
