@@ -1,6 +1,7 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving,
     ScopedTypeVariables,
+    BangPatterns,
     OverloadedStrings,
     TypeOperators,
     DeriveFunctor,
@@ -36,12 +37,13 @@ module Data.Sparse (
         withState,
 
         -- * Primitives
-        -- stateP,
+        stateP,
         -- mapStateP,
         -- mapInputP,
         headP,
         splitP,
         gateP,
+        atEnd,
 
         -- * Basic parsers
         char,         
@@ -52,6 +54,10 @@ module Data.Sparse (
         space,
         integer,
         stringLiteral,
+        brackets,
+        braces,
+        complete,
+        ifState,
 
         -- * Combinators
         between,
@@ -69,6 +75,7 @@ module Data.Sparse (
 
 import Data.Char
 import Data.Maybe -- DEBUG
+import Data.Ratio -- DEBUG
 import Data.String
 import Data.Tree
 import Data.Default
@@ -160,6 +167,7 @@ stateP = (SparseT (PartialP st))
     where
         st = \(s, as) -> Just ((s, as), s)
 
+{-
 -- | Transform state.
 mapStateP :: (s -> s) -> SparseT s a ()
 mapStateP f = (SparseT (PartialP st))
@@ -171,6 +179,7 @@ mapInputP :: ([a] -> [a]) -> SparseT s a ()
 mapInputP f = (SparseT (PartialP st))
     where
         st = \(s, as) -> Just ((s, f as), ())
+-}
 
 
 -- | Consumes one input element.
@@ -198,6 +207,9 @@ splitP = SparseT . PartialP . splitP'
 gateP :: (s -> [a] -> Bool) -> SparseT s a ()
 gateP = SparseT . PartialP . gateP'
 
+atEnd :: SparseT s a ()
+atEnd = SparseT $ PartialP atEnd'
+
 
 headP' :: (s -> a -> Bool) -> (s, [a]) -> Maybe ((s, [a]), a)
 headP' p (s, [])     = Nothing
@@ -208,11 +220,22 @@ splitP' p (s, []) = Nothing
 splitP' p (s, ys) = let n = p s ys in if n < 1 then Nothing else Just ((s, drop n ys), take n ys)
 
 gateP' :: (s -> [a] -> Bool) -> (s, [a]) -> Maybe ((s, [a]), ())
-gateP' p (s, [])     = Nothing
+gateP' p (s, [])    = Nothing
 gateP' p (s, xs)    = if not (p s xs) then Nothing else Just ((s, xs), ())
 
 
+atEnd' :: (s, [a]) -> Maybe ((s, [a]), ())
+atEnd' (s, []) = Just ((s, []), ())
+atEnd' (s, xs) = Nothing
+
 ----------
+
+complete :: SparseT s a b -> SparseT s a b
+complete x = do
+    res <- x
+    atEnd
+    return res
+
 
 ifState :: (s -> Bool) -> SparseT s a b -> SparseT s a b
 ifState p x = gateP (\s _ -> p s) >> x
@@ -312,8 +335,8 @@ json = empty
     <|> (const (Boolean True)     <$> string "true")
     <|> (const Null               <$> string "null")     
     where  
-        members  = brackets (pair `sepBy` char ',')
-        elements = braces (value `sepBy` char ',')
+        members  = brackets (pair `sepBy` (char ',' >> optional space))
+        elements = braces (value `sepBy` (char ',' >> optional space))
 
         pair  = do
             n <- stringLiteral
@@ -327,23 +350,26 @@ json = empty
 
 ----------
 
-type Duration = Rational
+type Duration = Double
 
 data Rhythm a
-    = Beat       Duration a                     -- d is divisible by 2
-    | Group      [Rhythm a]                     -- normal note sequence
-    | Dots       Int (Rhythm a)                 -- n > 0.
-    | Tuplet     Duration (Rhythm a)            -- d is an emelent of 'tupletMods'.
+    = Beat       !Duration a                     -- d is divisible by 2
+    | Group      ![Rhythm a]                     -- normal note sequence
+    | Dots       !Int !(Rhythm a)                 -- n > 0.
+    | Tuplet     !Duration !(Rhythm a)            -- d is an emelent of 'tupletMods'.
     deriving (Eq, Show, Functor, Foldable)
 
 rhTree :: Show a => Rhythm a -> Tree String
 rhTree = go
     where
-        go (Beat d a)   = Node (show d{- ++ ":" ++ show a-}) []
+        go (Beat d a)   = Node (showDur d{- ++ ":" ++ show a-}) []
         go (Group as)   = Node "" (fmap rhTree as)
         go (Dots n a)   = Node ("dot:" ++ show n) [rhTree a]
-        go (Tuplet d a) = Node ("tuplet:" ++ show d) [rhTree a]
-        -- (realToFrac d :: Double)
+        go (Tuplet d a) = Node ("tuplet:" ++ showDur d) [rhTree a]
+        -- (realToFrac d :: Double)    
+        
+        showDur x = show (numerator (toRational x)) ++ "/"
+                 ++ show (denominator (toRational x))
 
 putRh :: Show a => Maybe (Rhythm a) -> IO () 
 putRh = putStrLn . drawTree . rhTree . fromMaybe (error "Could not quantize")
@@ -361,7 +387,8 @@ type Quant s a = SparseT s (Duration, a) (Rhythm a)
 data QuantState = QuantState {
         timeMod_ :: Duration,  
         recur_   :: Int
-    }
+    }          
+    deriving (Eq, Show)
 instance Default QuantState where def = QuantState {
         timeMod_ = 1,
         recur_   = 0
@@ -384,7 +411,7 @@ class HasRecur a where
     recur = mapRecur succ
     unrecur = mapRecur pred
     guardRecur :: SparseT a m n -> SparseT a m n
-    guardRecur = ifState (\x -> getRecur x < 5)
+    guardRecur = ifState (\x -> getRecur x < kMaxRecur)
 instance HasRecur QuantState where
     getRecur                     = recur_
     mapRecur f (QuantState tm r) = QuantState tm (f r)
@@ -404,27 +431,31 @@ quant' = runSparseT
 allDivs :: (HasTimeScale s, HasRecur s) => Quant s a -> Quant s a
 allDivs x = msum $ fmap (`scaleTime` x) divs
     where
-        divs = [8,4,2,1] ++ fmap (recip.(2^)) [1..5] :: [Rational]
+        divs = [8,4,2,1] ++ fmap (recip.(2^)) [1..5] :: [Duration]
 
+
+-- Tries to match 2.5, then shorter
+rh5 :: (HasTimeScale s, HasRecur s) => Quant s a
+rh5 = group [rh4,rh3] <|> group [rh3,rh4]
 
 -- Tries to match 1, then shorter
 rh4 :: (HasTimeScale s, HasRecur s) => Quant s a
 rh4 = withState recur unrecur $ guardRecur $ empty
-    -- 1/4 1/2 1/4
-    <|> (half (group [half rh4, rh4, half rh4]))
+    -- 1
+    <|> note
 
     -- 1/4 1/4 1/4 1/4
     <|> (quarter (group [rh4, rh4, rh4, rh4]))
 
-    -- dotted figures
-    <|> (half (group [rh3, half rh4]))
-    <|> (half (group [half rh4, rh3]))
-
     -- 1/2 1/2
     <|> (half (group [rh4, rh4]))
 
-    -- 1
-    <|> note
+    -- 1/4 1/2 1/4
+    <|> (half (group [half rh4, rh4, half rh4]))
+
+    -- dotted figures
+    <|> (half (group [rh3, half rh4]))
+    <|> (half (group [half rh4, rh3]))
 
 
 
@@ -465,6 +496,17 @@ scaleTime n = withState
 group :: [Quant s a] -> Quant s a
 group xs = Group <$> sequence xs
 
+kMaxRecur = 6
+-- 5
+r = [2,2,1,1,1,1,  2,2,1,3, 0.5,0.5,1,1,1] :: [Duration]
+
+-- 5
+r2 = [2,2, 1,1,1,2,1,2, 1,3, 0.5,0.5,1,1,1] :: [Duration]
+
+-- 4
+r3 = [1,1,2,3,1]:: [Duration]
+
+
 -- Mathes a single note whose duration is simple
 -- note :: Quant s a
 -- note = noteIf (\s d x -> isDivisibleBy 2 d)
@@ -502,4 +544,4 @@ list z f xs = case xs of
     [] -> z
     ys -> f ys
 
-[a,b,c,d,e,f,g,x,y,z,m,n,o,p,q,r] = undefined
+-- [a,b,c,d,e,f,g,x,y,z,m,n,o,p,q,r] = undefined
