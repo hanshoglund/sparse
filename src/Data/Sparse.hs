@@ -36,9 +36,9 @@ module Data.Sparse (
         withState,
 
         -- * Primitives
-        stateP,
-        mapStateP,
-        mapInputP,
+        -- stateP,
+        -- mapStateP,
+        -- mapInputP,
         headP,
         splitP,
         gateP,
