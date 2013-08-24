@@ -401,27 +401,48 @@ quant' = runSparseT
 
 
 
--- Tries to match 1
+allDivs :: (HasTimeScale s, HasRecur s) => Quant s a -> Quant s a
+allDivs x = msum $ fmap (`scaleTime` x) divs
+    where
+        divs = [8,4,2,1] ++ fmap (recip.(2^)) [1..5] :: [Rational]
+
+
+-- Tries to match 1, then shorter
 rh4 :: (HasTimeScale s, HasRecur s) => Quant s a
 rh4 = withState recur unrecur $ guardRecur $ empty
-    <|> note
+    -- 1/4 1/2 1/4
+    <|> (half (group [half rh4, rh4, half rh4]))
+
+    -- 1/4 1/4 1/4 1/4
+    <|> (quarter (group [rh4, rh4, rh4, rh4]))
 
     -- dotted figures
     <|> (half (group [rh3, half rh4]))
     <|> (half (group [half rh4, rh3]))
 
-    -- syncopation
-    <|> (half (group [half note, unit note, half note]))
+    -- 1/2 1/2
+    <|> (half (group [rh4, rh4]))
 
-    <|> (quarter (group [note, note, note, note]))
+    -- 1
+    <|> note
 
--- Tries to match 1.5
+
+
+-- Tries to match 1+1/2, then shorter
 rh3 :: (HasTimeScale s, HasRecur s) => Quant s a
 rh3 = withState recur unrecur $ empty
-    <|> dot rh4
-    <|> (group [unit note, half note])
-    <|> (group [half note, unit note])
+    -- 1+1/2
+    <|> dot note
+
+    -- 1/2 1/2 1/2
     <|> (triple (half (group [rh4, rh4, rh4])))
+
+    -- 1 1/2
+    <|> (group [unit rh4, half rh4])
+
+    -- 1/2 1
+    <|> (group [half rh4, unit rh4])
+
 
 -- Tries to match something in scale 1.5
 dot, unit, double, half, triple, quarter :: (HasTimeScale s, HasRecur s) => Quant s a -> Quant s a
