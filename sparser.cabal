@@ -1,5 +1,5 @@
 
-name:               sparse
+name:               sparser
 version:            0.5
 cabal-version:      >= 1.10
 author:             Hans Hoglund
@@ -16,7 +16,7 @@ description:
 
 source-repository head
     type:               git
-    location:           git://github.com/hanshoglund/sparse.git
+    location:           git://github.com/hanshoglund/sparser.git
 
 library
     build-depends:

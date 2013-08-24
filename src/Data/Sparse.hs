@@ -24,16 +24,16 @@
 --
 -------------------------------------------------------------------------------------
 
-module Data.Sparse (
-        -- * Sparse
-        SparseT,
-        Sparse,
-        asSparse,
+module Data.Sparser (
+        -- * Sparser
+        SparserT,
+        Sparser,
+        asSparser,
 
         -- * Running
-        runSparse,
-        runSparseT,
-        runSparseT',
+        runSparser,
+        runSparserT,
+        runSparserT',
         withState,
 
         -- * Primitives
@@ -120,28 +120,28 @@ instance Monoid ((?->) a b) where
 
 ----------
 
-newtype SparseT s a b = SparseT { getSparseT :: (s, [a]) ?-> b }
+newtype SparserT s a b = SparserT { getSparserT :: (s, [a]) ?-> b }
     deriving (Semigroup, Monoid, Functor, Pointed, Applicative, Alternative, Monad, MonadPlus)
 
-asSparse = id
-asSparse :: Sparse a -> Sparse a
+asSparser = id
+asSparser :: Sparser a -> Sparser a
 
-instance IsString (SparseT s Char String) where
+instance IsString (SparserT s Char String) where
     fromString = string
 
-type Sparse = SparseT () Char
+type Sparser = SparserT () Char
 
 -- | 
 -- Run a parser, returning the result.
 -- 
-runSparse :: Sparse a -> String -> Maybe a
-runSparse p = runSparseT p ()
+runSparser :: Sparser a -> String -> Maybe a
+runSparser p = runSparserT p ()
 
 -- | 
 -- Run a parser with a custom state, returning the result.
 -- 
-runSparseT :: SparseT s a b -> s -> [a] -> Maybe b
-runSparseT = curry . fmap (fmap snd) . getPartialP . getSparseT
+runSparserT :: SparserT s a b -> s -> [a] -> Maybe b
+runSparserT = curry . fmap (fmap snd) . getPartialP . getSparserT
 
 -- | 
 -- Run a parser with a custom state.
@@ -149,12 +149,12 @@ runSparseT = curry . fmap (fmap snd) . getPartialP . getSparseT
 -- This is the most general way to run a parser. It returns the final state,
 -- remaining input and the result.
 -- 
-runSparseT' :: SparseT s a b -> s -> [a] -> Maybe (s, [a], b)
-runSparseT' = curry . fmap (fmap untrip) . getPartialP . getSparseT
+runSparserT' :: SparserT s a b -> s -> [a] -> Maybe (s, [a], b)
+runSparserT' = curry . fmap (fmap untrip) . getPartialP . getSparserT
     where untrip ((a,b),c) = (a,b,c)
 
-withState :: (s -> t) -> (t -> s) -> SparseT t a b -> SparseT s a b
-withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
+withState :: (s -> t) -> (t -> s) -> SparserT t a b -> SparserT s a b
+withState setup teardown (SparserT (PartialP f)) = (SparserT (PartialP $ ws f))
     where
         ws f = fmap (first (first teardown)) . f . first setup
 
@@ -162,21 +162,21 @@ withState setup teardown (SparseT (PartialP f)) = (SparseT (PartialP $ ws f))
 ----------
 
 -- | Return the state as result.
-stateP :: SparseT s a s
-stateP = (SparseT (PartialP st))
+stateP :: SparserT s a s
+stateP = (SparserT (PartialP st))
     where
         st = \(s, as) -> Just ((s, as), s)
 
 {-
 -- | Transform state.
-mapStateP :: (s -> s) -> SparseT s a ()
-mapStateP f = (SparseT (PartialP st))
+mapStateP :: (s -> s) -> SparserT s a ()
+mapStateP f = (SparserT (PartialP st))
     where
         st = \(s, as) -> Just ((f s, as), ())
 
 -- | Transform input.
-mapInputP :: ([a] -> [a]) -> SparseT s a ()
-mapInputP f = (SparseT (PartialP st))
+mapInputP :: ([a] -> [a]) -> SparserT s a ()
+mapInputP f = (SparserT (PartialP st))
     where
         st = \(s, as) -> Just ((s, f as), ())
 -}
@@ -186,8 +186,8 @@ mapInputP f = (SparseT (PartialP st))
 --
 --   Fails if the predicate fails, or if there is no more input.
 --
-headP :: (s -> a -> Bool) -> SparseT s a a
-headP  = SparseT . PartialP . headP'
+headP :: (s -> a -> Bool) -> SparserT s a a
+headP  = SparserT . PartialP . headP'
 
 
 -- | Consume one or more input elements.
@@ -197,18 +197,18 @@ headP  = SparseT . PartialP . headP'
 --
 --   Fails if the predicate return 0 or less, or if there is no more input.
 --
-splitP :: (s -> [a] -> Int) -> SparseT s a [a]
-splitP = SparseT . PartialP . splitP'
+splitP :: (s -> [a] -> Int) -> SparserT s a [a]
+splitP = SparserT . PartialP . splitP'
 
 -- | Succeed based on predicate, but do not consume input.
 --
 --   The given function receives the /entire/ remaining input.
 --
-gateP :: (s -> [a] -> Bool) -> SparseT s a ()
-gateP = SparseT . PartialP . gateP'
+gateP :: (s -> [a] -> Bool) -> SparserT s a ()
+gateP = SparserT . PartialP . gateP'
 
-atEnd :: SparseT s a ()
-atEnd = SparseT $ PartialP atEnd'
+atEnd :: SparserT s a ()
+atEnd = SparserT $ PartialP atEnd'
 
 
 headP' :: (s -> a -> Bool) -> (s, [a]) -> Maybe ((s, [a]), a)
@@ -230,29 +230,29 @@ atEnd' (s, xs) = Nothing
 
 ----------
 
-complete :: SparseT s a b -> SparseT s a b
+complete :: SparserT s a b -> SparserT s a b
 complete x = do
     res <- x
     atEnd
     return res
 
 
-ifState :: (s -> Bool) -> SparseT s a b -> SparseT s a b
+ifState :: (s -> Bool) -> SparserT s a b -> SparserT s a b
 ifState p x = gateP (\s _ -> p s) >> x
 
--- char :: Char -> Sparse Char
+-- char :: Char -> Sparser Char
 
 char c = charIf (== c)
 
 notChar c = charIf (/= c)
 
--- charIf :: (Char -> Bool) -> Sparse Char
+-- charIf :: (Char -> Bool) -> Sparser Char
 charIf p = headP (const p)
 
--- string :: String -> Sparse String
+-- string :: String -> Sparser String
 string s = stringIf (length s) (== s)
 
--- stringIf :: Int -> (String -> Bool) -> Sparse String
+-- stringIf :: Int -> (String -> Bool) -> Sparser String
 stringIf n p = splitP (\_ xs -> if p (take n xs) then n else 0)
 
 ----------
@@ -288,10 +288,10 @@ count n p               | n <= 0    = return []
 space   = many1 (charIf isSpace)
 symbol  = many1 (charIf isAlphaNum)
 
-integer :: SparseT s Char Integer
+integer :: SparserT s Char Integer
 integer = read <$> many1 (charIf isDigit)
 
-stringLiteral :: SparseT s Char String
+stringLiteral :: SparserT s Char String
 stringLiteral = between (char '"') (char '"') $ many (notChar '"')
 
 brackets = between (char '{') (char '}')
@@ -304,7 +304,7 @@ braces   = between (char '[') (char ']')
 
 
 
-test :: SparseT Int Char String
+test :: SparserT Int Char String
 test = withState id id $ do
     ifState (== 0) $ string "name:"
     optional space        
@@ -325,7 +325,7 @@ data JSON
     | Null
     deriving (Eq, Ord, Show)
 
-json :: SparseT s Char JSON
+json :: SparserT s Char JSON
 json = empty
     <|> (Object                   <$> members)
     <|> (Array                    <$> elements)
@@ -382,7 +382,7 @@ instance Monoid (Rhythm a) where
     r        `mappend` Group bs   =  Group ([r] <> bs)
     Group as `mappend` r          =  Group (as <> [r])
 
-type Quant s a = SparseT s (Duration, a) (Rhythm a)
+type Quant s a = SparserT s (Duration, a) (Rhythm a)
 
 data QuantState = QuantState {
         timeMod_ :: Duration,  
@@ -410,7 +410,7 @@ class HasRecur a where
     recur, unrecur :: a -> a
     recur = mapRecur succ
     unrecur = mapRecur pred
-    guardRecur :: SparseT a m n -> SparseT a m n
+    guardRecur :: SparserT a m n -> SparserT a m n
     guardRecur = ifState (\x -> getRecur x < kMaxRecur)
 instance HasRecur QuantState where
     getRecur                     = recur_
@@ -423,7 +423,7 @@ quant :: Default s => Quant s a -> [(Duration, a)] -> Maybe (Rhythm a)
 quant p = quant' p def
 
 quant' :: Quant s a -> s -> [(Duration, a)] -> Maybe (Rhythm a)
-quant' = runSparseT
+quant' = runSparserT
 
 
 
